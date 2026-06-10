@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from '
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getFirstVehicle } from '../../src/database/repositories/vehicleRepository';
+import { getVehicleById } from '../../src/database/repositories/vehicleRepository';
+import { getSelectedVehicleId } from '../../src/database/repositories/settingsRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
 import { MaintenanceRecord, Vehicle } from '../../src/types';
 import { formatCurrencyBRL, formatDateBR } from '../../src/utils/formatters';
@@ -15,10 +16,14 @@ export default function Maintenances() {
 
   useFocusEffect(
     useCallback(() => {
-      const v = getFirstVehicle();
+      const selectedVehicleId = getSelectedVehicleId();
+      const v = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
       if (v) {
         setVehicle(v);
         setRecords(getMaintenanceRecords(v.id));
+      } else {
+        setVehicle(null);
+        setRecords([]);
       }
     }, [])
   );

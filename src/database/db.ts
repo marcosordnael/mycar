@@ -77,6 +77,14 @@ const initializeSchema = (db: SQLite.SQLiteDatabase): void => {
   } catch (e) {
     // Coluna já existe
   }
+
+  db.execSync(`
+    UPDATE maintenance_record
+    SET nextRevisionMileage = mileage + nextRevisionMileage
+    WHERE nextRevisionMileage IS NOT NULL
+      AND nextRevisionMileage > 0
+      AND nextRevisionMileage < mileage;
+  `);
 };
 
 export const closeDbConnection = (): void => {

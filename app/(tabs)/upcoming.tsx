@@ -3,11 +3,17 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from '
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getFirstVehicle } from '../../src/database/repositories/vehicleRepository';
+import { getVehicleById } from '../../src/database/repositories/vehicleRepository';
+import { getSelectedVehicleId } from '../../src/database/repositories/settingsRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
 import { MaintenanceRecord, Vehicle } from '../../src/types';
 import { formatDateBR } from '../../src/utils/formatters';
 import { getRevisionStatus, getStatusColor, getStatusLabel } from '../../src/utils/statusHelper';
+
+const getCardIndicatorStyle = (color: string) => ({
+  width: 6,
+  backgroundColor: color,
+});
 
 export default function Upcoming() {
   const router = useRouter();
@@ -16,7 +22,8 @@ export default function Upcoming() {
 
   useFocusEffect(
     useCallback(() => {
-      const v = getFirstVehicle();
+      const selectedVehicleId = getSelectedVehicleId();
+      const v = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
       if (v) {
         setVehicle(v);
         const allRecords = getMaintenanceRecords(v.id);
@@ -37,6 +44,9 @@ export default function Upcoming() {
         });
 
         setUpcomingRecords(filtered);
+      } else {
+        setVehicle(null);
+        setUpcomingRecords([]);
       }
     }, [])
   );
@@ -63,7 +73,7 @@ export default function Upcoming() {
 
     return (
       <TouchableOpacity onPress={() => router.push(`/maintenance/${item.id}`)} activeOpacity={0.8} style={styles.card}>
-        <View style={styles.cardIndicator(badgeColor)} />
+        <View style={getCardIndicatorStyle(badgeColor)} />
         <View style={styles.cardContent}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.serviceType}</Text>
@@ -204,10 +214,6 @@ const styles = StyleSheet.create({
     borderColor: '#374151',
     overflow: 'hidden',
   },
-  cardIndicator: (color: string) => ({
-    width: 6,
-    backgroundColor: color,
-  }),
   cardContent: {
     flex: 1,
     padding: 16,

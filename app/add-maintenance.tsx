@@ -6,7 +6,8 @@ import { TextField } from '../src/components/TextField';
 import { Button } from '../src/components/Button';
 import { FormSectionCard } from '../src/components/FormSectionCard';
 import { createMaintenanceRecord } from '../src/database/repositories/maintenanceRepository';
-import { getFirstVehicle } from '../src/database/repositories/vehicleRepository';
+import { getVehicleById, updateVehicle } from '../src/database/repositories/vehicleRepository';
+import { getSelectedVehicleId } from '../src/database/repositories/settingsRepository';
 
 export default function AddMaintenance() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function AddMaintenance() {
   const [cost, setCost] = useState('');
   const [notes, setNotes] = useState('');
   const [nextDate, setNextDate] = useState('');
-  const [nextMileage, setNextMileage] = useState('');
+  const [nextMileageInterval, setNextMileageInterval] = useState('');
 
   const handleSave = () => {
     if (!serviceType.trim() || !date.trim() || !mileage.trim() || !cost.trim()) {
@@ -37,11 +38,25 @@ export default function AddMaintenance() {
       return;
     }
 
-    const vehicle = getFirstVehicle();
+    const selectedVehicleId = getSelectedVehicleId();
+    const vehicle = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
     if (!vehicle) {
       Alert.alert('Erro', 'Nenhum veículo encontrado. Cadastre um veículo primeiro.');
       return;
     }
+
+    const nextMileageLimit = nextMileageInterval.trim()
+      ? parseInt(nextMileageInterval, 10)
+      : undefined;
+
+    if (nextMileageLimit !== undefined && (isNaN(nextMileageLimit) || nextMileageLimit <= 0)) {
+      Alert.alert('Erro', 'Informe um intervalo de quilometragem válido para a próxima revisão.');
+      return;
+    }
+
+    const nextRevisionMileage = nextMileageLimit !== undefined
+      ? numMileage + nextMileageLimit
+      : undefined;
 
     try {
       createMaintenanceRecord(
@@ -52,8 +67,19 @@ export default function AddMaintenance() {
         numCost,
         notes.trim(),
         nextDate.trim() || undefined,
-        nextMileage.trim() ? parseInt(nextMileage) : undefined
+        nextRevisionMileage
       );
+
+      if (vehicle.currentMileage === undefined || numMileage > vehicle.currentMileage) {
+        updateVehicle(
+          vehicle.id,
+          vehicle.brand,
+          vehicle.model,
+          vehicle.year,
+          vehicle.plate,
+          numMileage
+        );
+      }
 
       Alert.alert('Sucesso', 'Manutenção registrada com sucesso!', [
         { text: 'OK', onPress: () => router.back() }
@@ -115,11 +141,11 @@ export default function AddMaintenance() {
                 placeholder="AAAA-MM-DD"
               />
               <TextField 
-                label="Limite de Quilometragem" 
-                value={nextMileage}
-                onChangeText={setNextMileage}
+                label="Intervalo até próxima revisão (km)" 
+                value={nextMileageInterval}
+                onChangeText={setNextMileageInterval}
                 keyboardType="number-pad"
-                placeholder="Ex: 60000"
+                placeholder="Ex: 10000"
               />
             </FormSectionCard>
 

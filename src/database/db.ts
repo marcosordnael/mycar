@@ -85,6 +85,31 @@ const initializeSchema = (db: SQLite.SQLiteDatabase): void => {
       AND nextRevisionMileage > 0
       AND nextRevisionMileage < mileage;
   `);
+
+  db.execSync(`
+    UPDATE maintenance_record
+    SET
+      nextRevisionMileage = (
+        SELECT vehicle.currentMileage + (maintenance_record.nextRevisionMileage - maintenance_record.mileage)
+        FROM vehicle
+        WHERE vehicle.id = maintenance_record.vehicleId
+      ),
+      mileage = (
+        SELECT vehicle.currentMileage
+        FROM vehicle
+        WHERE vehicle.id = maintenance_record.vehicleId
+      )
+    WHERE nextRevisionMileage IS NOT NULL
+      AND nextRevisionMileage > mileage
+      AND EXISTS (
+        SELECT 1
+        FROM vehicle
+        WHERE vehicle.id = maintenance_record.vehicleId
+          AND vehicle.currentMileage IS NOT NULL
+          AND vehicle.currentMileage >= 0
+          AND maintenance_record.mileage > vehicle.currentMileage
+      );
+  `);
 };
 
 export const closeDbConnection = (): void => {

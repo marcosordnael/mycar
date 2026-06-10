@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,12 @@ export default function AddMaintenance() {
   const [notes, setNotes] = useState('');
   const [nextDate, setNextDate] = useState('');
   const [nextMileageInterval, setNextMileageInterval] = useState('');
+
+  useEffect(() => {
+    if (selectedVehicle?.currentMileage !== undefined) {
+      setMileage((currentValue) => currentValue.trim() ? currentValue : selectedVehicle.currentMileage!.toString());
+    }
+  }, [selectedVehicle?.currentMileage]);
 
   const handleSave = () => {
     if (!serviceType.trim() || !date.trim() || !mileage.trim() || !cost.trim()) {

@@ -1,7 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions, Platform } from 'react-native';
 
 const { width } = Dimensions.get('window');
+const VEHICLE_CARD_WIDTH = width - 48;
+const VEHICLE_CARD_SPACING = 16;
+const VEHICLE_CARD_STEP = VEHICLE_CARD_WIDTH + VEHICLE_CARD_SPACING;
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +27,7 @@ export default function Dashboard() {
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [recordsByVehicleId, setRecordsByVehicleId] = useState<Record<number, MaintenanceRecord[]>>({});
   const [vehicleCardHeight, setVehicleCardHeight] = useState(0);
+  const vehicleListRef = useRef<FlatList<Vehicle>>(null);
   const activeVehicle = selectedVehicle;
 
   useFocusEffect(
@@ -59,6 +63,33 @@ export default function Dashboard() {
   const statusSummary = getStatusSummary(records, activeVehicle?.currentMileage);
   const statusOverdue = statusSummary.overdue;
   const statusSoon = statusSummary.soon;
+  const healthScore = getHealthScore(records, activeVehicle?.currentMileage);
+
+  const selectVehicleFromCarouselIndex = (index: number) => {
+    const vehicle = vehicles[index];
+
+    if (!vehicle || vehicle.id === activeVehicle?.id) {
+      return;
+    }
+
+    setSelectedVehicle(vehicle);
+    setRecords(recordsByVehicleId[vehicle.id] ?? getMaintenanceRecords(vehicle.id));
+  };
+
+  useEffect(() => {
+    const activeIndex = vehicles.findIndex((vehicle) => vehicle.id === activeVehicle?.id);
+
+    if (activeIndex < 0) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      vehicleListRef.current?.scrollToIndex({
+        index: activeIndex,
+        animated: true,
+      });
+    });
+  }, [activeVehicle?.id, vehicles]);
 
   const renderCarousel = () => {
     const data = [
@@ -110,13 +141,23 @@ export default function Dashboard() {
             
             <View style={{ marginBottom: 32 }}>
               <FlatList
+                ref={vehicleListRef}
                 data={vehicles}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={item => item.id.toString()}
                 contentContainerStyle={{ paddingHorizontal: 24 }}
-                snapToInterval={width - 48 + 16}
+                snapToInterval={VEHICLE_CARD_STEP}
                 decelerationRate="fast"
+                getItemLayout={(_, index) => ({
+                  length: VEHICLE_CARD_STEP,
+                  offset: VEHICLE_CARD_STEP * index,
+                  index,
+                })}
+                onMomentumScrollEnd={(event) => {
+                  const nextIndex = Math.round(event.nativeEvent.contentOffset.x / VEHICLE_CARD_STEP);
+                  selectVehicleFromCarouselIndex(nextIndex);
+                }}
                 renderItem={({ item }) => {
                   const itemRecords = recordsByVehicleId[item.id] ?? [];
                   const itemStatusSummary = getStatusSummary(itemRecords, item.currentMileage);
@@ -163,6 +204,57 @@ export default function Dashboard() {
                   </View>
                 }
               />
+            </View>
+
+            <View style={styles.smartSection}>
+              <View style={styles.healthCard}>
+                <View style={styles.healthHeader}>
+                  <View>
+                    <Text style={styles.cardEyebrow}>Saúde do veículo</Text>
+                    <Text style={styles.healthValue}>{healthScore}/100</Text>
+                  </View>
+                  <View style={styles.healthIconBox}>
+                    <Ionicons name="pulse" size={24} color={healthScore >= 80 ? '#10B981' : healthScore >= 60 ? '#F59E0B' : '#EF4444'} />
+                  </View>
+                </View>
+                <View style={styles.healthTrack}>
+                  <View
+                    style={[
+                      styles.healthFill,
+                      {
+                        width: `${healthScore}%`,
+                        backgroundColor: healthScore >= 80 ? '#10B981' : healthScore >= 60 ? '#F59E0B' : '#EF4444',
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.summaryGrid}>
+                <View style={styles.summaryCard}>
+                  <Ionicons name="warning-outline" size={22} color="#EF4444" />
+                  <Text style={styles.summaryValue}>{statusOverdue}</Text>
+                  <Text style={styles.summaryLabel}>Atrasadas</Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Ionicons name="calendar-outline" size={22} color="#F59E0B" />
+                  <Text style={styles.summaryValue}>{statusSoon}</Text>
+                  <Text style={styles.summaryLabel}>Próximas</Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Ionicons name="build-outline" size={22} color="#60A5FA" />
+                  <Text style={styles.summaryValue}>{records.length}</Text>
+                  <Text style={styles.summaryLabel}>Manutenções</Text>
+                </View>
+              </View>
+
+              <View style={styles.spendingCard}>
+                <View>
+                  <Text style={styles.cardEyebrow}>Gastos</Text>
+                  <Text style={styles.spendingPeriod}>Todo período</Text>
+                </View>
+                <Text style={styles.spendingValue}>{formatCurrencyBRL(totalSpent)}</Text>
+              </View>
             </View>
 
             {/* ALERT BLOCK (Resumo Inteligente) */}
@@ -338,6 +430,103 @@ const styles = StyleSheet.create({
   carouselContainer: {
     marginBottom: 8,
   },
+  smartSection: {
+    paddingHorizontal: 24,
+    marginBottom: 24,
+  },
+  healthCard: {
+    backgroundColor: '#1F2937',
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 14,
+  },
+  healthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  cardEyebrow: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  healthValue: {
+    color: '#F9FAFB',
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  healthIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  healthTrack: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    overflow: 'hidden',
+  },
+  healthFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    marginHorizontal: -5,
+    marginBottom: 14,
+  },
+  summaryCard: {
+    flex: 1,
+    minHeight: 104,
+    backgroundColor: '#1F2937',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+    padding: 12,
+    marginHorizontal: 5,
+    justifyContent: 'space-between',
+  },
+  summaryValue: {
+    color: '#F9FAFB',
+    fontSize: 26,
+    fontWeight: '900',
+  },
+  summaryLabel: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  spendingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1F2937',
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  spendingPeriod: {
+    color: '#D1D5DB',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  spendingValue: {
+    color: '#10B981',
+    fontSize: 22,
+    fontWeight: '900',
+  },
   recentCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -390,8 +579,8 @@ const styles = StyleSheet.create({
   },
 
   vehicleCardWrapper: {
-    width: width - 48,
-    marginRight: 16,
+    width: VEHICLE_CARD_WIDTH,
+    marginRight: VEHICLE_CARD_SPACING,
   },
   addVehicleCard: {
     width: '100%',

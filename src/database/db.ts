@@ -34,6 +34,7 @@ const initializeSchema = (db: SQLite.SQLiteDatabase): void => {
       year INTEGER NOT NULL,
       plate TEXT NOT NULL,
       currentMileage INTEGER,
+      sortOrder INTEGER,
       createdAt TEXT NOT NULL
     );
 
@@ -67,6 +68,16 @@ const initializeSchema = (db: SQLite.SQLiteDatabase): void => {
   } catch (e) {
     // Coluna já existe
   }
+  try {
+    db.execSync('ALTER TABLE vehicle ADD COLUMN sortOrder INTEGER;');
+  } catch (e) {
+    // Coluna já existe
+  }
+  db.execSync(`
+    UPDATE vehicle
+    SET sortOrder = id
+    WHERE sortOrder IS NULL;
+  `);
   try {
     db.execSync('ALTER TABLE maintenance_record ADD COLUMN nextRevisionDate TEXT;');
   } catch (e) {

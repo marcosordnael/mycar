@@ -1,22 +1,219 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions, Platform } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Animated, View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, Dimensions, Platform, PanResponder } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const VEHICLE_CARD_WIDTH = width - 48;
 const VEHICLE_CARD_SPACING = 16;
 const VEHICLE_CARD_STEP = VEHICLE_CARD_WIDTH + VEHICLE_CARD_SPACING;
+const REORDER_CARD_WIDTH = 176;
+const REORDER_CARD_SPACING = 12;
+const REORDER_CARD_STEP = REORDER_CARD_WIDTH + REORDER_CARD_SPACING;
+const REORDER_OVERLAP_THRESHOLD = REORDER_CARD_SPACING + 4;
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getVehicles } from '../../src/database/repositories/vehicleRepository';
+import { getVehicles, updateVehicleOrder } from '../../src/database/repositories/vehicleRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
 import { Vehicle, MaintenanceRecord } from '../../src/types';
 import { formatCurrencyBRL, formatDateBR } from '../../src/utils/formatters';
 import { getHealthScore, getStatusSummary, getTotalSpent, getVehicleStatus } from '../../src/utils/maintenanceMetrics';
+import { ALL_TIME, CURRENT_YEAR, calculateExpenses, filterByPeriod, FinancePeriod } from '../../src/utils/financeFilters';
 import { CarouselMetricCard } from '../../src/components/CarouselMetricCard';
+import { PeriodFilter } from '../../src/components/PeriodFilter';
 import { VehicleCarouselCard } from '../../src/components/VehicleCarouselCard';
 import { useSelectedVehicle } from '../../src/context/SelectedVehicleContext';
+
+interface VehicleCarouselItemProps {
+  vehicle: Vehicle;
+  records: MaintenanceRecord[];
+  isSelected: boolean;
+  height: number;
+  onLayoutHeight: (height: number) => void;
+  onPress: () => void;
+}
+
+const VehicleCarouselItem = ({
+  vehicle,
+  records,
+  isSelected,
+  height,
+  onLayoutHeight,
+  onPress,
+}: VehicleCarouselItemProps) => {
+  const statusSummary = getStatusSummary(records, vehicle.currentMileage);
+
+  return (
+    <View
+      style={styles.vehicleCardWrapper}
+      onLayout={
+        height > 0
+          ? undefined
+          : (event) => onLayoutHeight(event.nativeEvent.layout.height)
+      }
+    >
+      <VehicleCarouselCard
+        brand={vehicle.brand}
+        model={vehicle.model}
+        year={vehicle.year.toString()}
+        mileage={vehicle.currentMileage}
+        status={getVehicleStatus(records, vehicle.currentMileage)}
+        overdueCount={statusSummary.overdue}
+        soonCount={statusSummary.soon}
+        healthScore={getHealthScore(records, vehicle.currentMileage)}
+        isSelected={isSelected}
+        onPress={onPress}
+      />
+    </View>
+  );
+};
+
+interface ReorderVehicleItemProps {
+  vehicle: Vehicle;
+  index: number;
+  dragFromIndex: number | null;
+  hoverIndex: number | null;
+  maxIndex: number;
+  isSelected: boolean;
+  isDragging: boolean;
+  onLongPress: () => void;
+  onDragMove: (toIndex: number) => void;
+  onDragEnd: (fromIndex: number, toIndex: number) => void;
+}
+
+const ReorderVehicleItem = ({
+  vehicle,
+  index,
+  dragFromIndex,
+  hoverIndex,
+  maxIndex,
+  isSelected,
+  isDragging,
+  onLongPress,
+  onDragMove,
+  onDragEnd,
+}: ReorderVehicleItemProps) => {
+  const dragX = useRef(new Animated.Value(0)).current;
+  const shiftX = useRef(new Animated.Value(0)).current;
+  const lastTargetIndexRef = useRef(index);
+
+  useEffect(() => {
+    if (!isDragging) {
+      dragX.setValue(0);
+    }
+  }, [dragX, isDragging]);
+
+  const getShiftX = (): number => {
+    if (dragFromIndex === null || hoverIndex === null || isDragging) {
+      return 0;
+    }
+
+    if (dragFromIndex < hoverIndex && index > dragFromIndex && index <= hoverIndex) {
+      return -REORDER_CARD_STEP;
+    }
+
+    if (dragFromIndex > hoverIndex && index < dragFromIndex && index >= hoverIndex) {
+      return REORDER_CARD_STEP;
+    }
+
+    return 0;
+  };
+
+  useEffect(() => {
+    Animated.spring(shiftX, {
+      toValue: getShiftX(),
+      speed: 22,
+      bounciness: 0,
+      useNativeDriver: true,
+    }).start();
+  }, [dragFromIndex, hoverIndex, index, isDragging, shiftX]);
+
+  const getTargetIndexFromDrag = useCallback((dx: number): number => {
+    if (dx > REORDER_OVERLAP_THRESHOLD) {
+      const crossedCards = Math.floor((dx - REORDER_OVERLAP_THRESHOLD) / REORDER_CARD_STEP) + 1;
+      return Math.min(maxIndex, index + crossedCards);
+    }
+
+    if (dx < -REORDER_OVERLAP_THRESHOLD) {
+      const crossedCards = Math.floor((-dx - REORDER_OVERLAP_THRESHOLD) / REORDER_CARD_STEP) + 1;
+      return Math.max(0, index - crossedCards);
+    }
+
+    return index;
+  }, [index, maxIndex]);
+
+  const shouldClaimHorizontalDrag = useCallback((dx: number, dy: number): boolean => {
+    return isDragging && Math.abs(dx) > 2 && Math.abs(dx) > Math.abs(dy);
+  }, [isDragging]);
+
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => isDragging,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return shouldClaimHorizontalDrag(gestureState.dx, gestureState.dy);
+      },
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return shouldClaimHorizontalDrag(gestureState.dx, gestureState.dy);
+      },
+      onPanResponderGrant: () => {
+        lastTargetIndexRef.current = hoverIndex ?? index;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const nextIndex = getTargetIndexFromDrag(gestureState.dx);
+        lastTargetIndexRef.current = nextIndex;
+        onDragMove(nextIndex);
+        dragX.setValue(gestureState.dx);
+      },
+      onPanResponderRelease: () => {
+        Animated.spring(dragX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        onDragEnd(index, lastTargetIndexRef.current);
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(dragX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        onDragEnd(index, index);
+      },
+      onShouldBlockNativeResponder: () => isDragging,
+    }),
+    [dragX, getTargetIndexFromDrag, hoverIndex, index, isDragging, onDragEnd, onDragMove, shouldClaimHorizontalDrag]
+  );
+
+  return (
+    <Animated.View
+      {...panResponder.panHandlers}
+      style={[
+        styles.reorderMiniWrapper,
+        isDragging && styles.reorderMiniWrapperDragging,
+        !isDragging && { transform: [{ translateX: shiftX }] },
+        isDragging && { transform: [{ translateX: dragX }] },
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.9}
+        delayLongPress={180}
+        onLongPress={onLongPress}
+        style={[styles.reorderMiniCard, isSelected && styles.reorderMiniCardSelected]}
+      >
+        <View style={styles.reorderMiniTopRow}>
+          <View style={styles.reorderMiniIndex}>
+            <Text style={styles.reorderMiniIndexText}>{index + 1}</Text>
+          </View>
+          <Ionicons name="reorder-three" size={20} color="#93C5FD" />
+        </View>
+        <Text style={styles.reorderMiniBrand} numberOfLines={1}>{vehicle.brand}</Text>
+        <Text style={styles.reorderMiniModel} numberOfLines={2}>{vehicle.model}</Text>
+        <Text style={styles.reorderMiniKm} numberOfLines={1}>
+          {vehicle.currentMileage !== undefined ? `${vehicle.currentMileage.toLocaleString('pt-BR')} km` : '--'}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 export default function Dashboard() {
   const router = useRouter();
@@ -26,9 +223,27 @@ export default function Dashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [recordsByVehicleId, setRecordsByVehicleId] = useState<Record<number, MaintenanceRecord[]>>({});
+  const [financePeriod, setFinancePeriod] = useState<FinancePeriod>(ALL_TIME);
   const [vehicleCardHeight, setVehicleCardHeight] = useState(0);
+  const [isReorderMode, setIsReorderMode] = useState(false);
+  const [draggingReorderVehicleId, setDraggingReorderVehicleId] = useState<number | null>(null);
+  const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const vehicleListRef = useRef<FlatList<Vehicle>>(null);
+  const vehiclesRef = useRef<Vehicle[]>([]);
   const activeVehicle = selectedVehicle;
+
+  useEffect(() => {
+    vehiclesRef.current = vehicles;
+  }, [vehicles]);
+
+  useEffect(() => {
+    if (!isReorderMode) {
+      setDraggingReorderVehicleId(null);
+      setDragFromIndex(null);
+      setHoverIndex(null);
+    }
+  }, [isReorderMode]);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,6 +266,10 @@ export default function Dashboard() {
   );
 
   const handleSelectVehicle = (vehicle: Vehicle) => {
+    if (isReorderMode) {
+      return;
+    }
+
     if (vehicle.id === activeVehicle?.id) {
       router.push('/vehicle-settings');
     } else {
@@ -59,13 +278,28 @@ export default function Dashboard() {
     }
   };
 
-  const totalSpent = getTotalSpent(records);
+  const filteredFinanceRecords = filterByPeriod(records, financePeriod);
+  const expenseSummary = calculateExpenses(filteredFinanceRecords);
+  const totalSpent = getTotalSpent(filteredFinanceRecords);
   const statusSummary = getStatusSummary(records, activeVehicle?.currentMileage);
   const statusOverdue = statusSummary.overdue;
   const statusSoon = statusSummary.soon;
   const healthScore = getHealthScore(records, activeVehicle?.currentMileage);
+  const healthColor = healthScore >= 80 ? '#10B981' : healthScore >= 60 ? '#F59E0B' : '#EF4444';
+  const healthLabel = healthScore >= 80 ? 'Em ótima condição' : healthScore >= 60 ? 'Atenção preventiva' : 'Precisa de cuidado';
+
+  const getFinancePeriodLabel = (period: FinancePeriod): string => {
+    if (period === ALL_TIME) return 'Todo período';
+    if (period === CURRENT_YEAR) return 'Ano atual';
+
+    return 'Mês atual';
+  };
 
   const selectVehicleFromCarouselIndex = (index: number) => {
+    if (isReorderMode) {
+      return;
+    }
+
     const vehicle = vehicles[index];
 
     if (!vehicle || vehicle.id === activeVehicle?.id) {
@@ -76,7 +310,53 @@ export default function Dashboard() {
     setRecords(recordsByVehicleId[vehicle.id] ?? getMaintenanceRecords(vehicle.id));
   };
 
+  const moveVehicle = (fromIndex: number, toIndex: number, shouldPersist = true, shouldScroll = true): boolean => {
+    const currentVehicles = vehiclesRef.current;
+    const nextIndex = Math.max(0, Math.min(currentVehicles.length - 1, toIndex));
+
+    if (fromIndex === nextIndex) {
+      return false;
+    }
+
+    const reorderedVehicles = [...currentVehicles];
+    const [movedVehicle] = reorderedVehicles.splice(fromIndex, 1);
+    reorderedVehicles.splice(nextIndex, 0, movedVehicle);
+    setVehicles(reorderedVehicles);
+    vehiclesRef.current = reorderedVehicles;
+
+    if (shouldPersist) {
+      updateVehicleOrder(reorderedVehicles);
+    }
+
+    if (shouldScroll) {
+      requestAnimationFrame(() => {
+        vehicleListRef.current?.scrollToIndex({
+          index: nextIndex,
+          animated: true,
+        });
+      });
+    }
+
+    return true;
+  };
+
+  const updateHoverIndex = (toIndex: number) => {
+    const nextIndex = Math.max(0, Math.min(vehiclesRef.current.length - 1, toIndex));
+    setHoverIndex(nextIndex);
+  };
+
+  const finishVehicleDrag = (fromIndex: number, toIndex: number) => {
+    setDraggingReorderVehicleId(null);
+    setDragFromIndex(null);
+    setHoverIndex(null);
+    moveVehicle(fromIndex, toIndex, true, true);
+  };
+
   useEffect(() => {
+    if (isReorderMode) {
+      return;
+    }
+
     const activeIndex = vehicles.findIndex((vehicle) => vehicle.id === activeVehicle?.id);
 
     if (activeIndex < 0) {
@@ -89,7 +369,7 @@ export default function Dashboard() {
         animated: true,
       });
     });
-  }, [activeVehicle?.id, vehicles]);
+  }, [activeVehicle?.id, isReorderMode, vehicles]);
 
   const renderCarousel = () => {
     const data = [
@@ -114,7 +394,7 @@ export default function Dashboard() {
               color={item.color}
             />
           )}
-          contentContainerStyle={{ paddingHorizontal: 24 }}
+          contentContainerStyle={styles.metricsCarouselContent}
         />
       </View>
     );
@@ -131,62 +411,82 @@ export default function Dashboard() {
             <Text style={styles.greeting}>Olá, Motorista</Text>
             <Text style={styles.title}>Meu Carro em Dia</Text>
           </View>
-          <TouchableOpacity onPress={() => router.push('/vehicle-settings')} style={styles.settingsBtn}>
-            <Ionicons name="options-outline" size={24} color="#F9FAFB" />
+          <TouchableOpacity
+            onPress={() => setIsReorderMode((currentValue) => !currentValue)}
+            style={[styles.settingsBtn, isReorderMode && styles.settingsBtnActive]}
+          >
+            <Ionicons name={isReorderMode ? 'checkmark' : 'reorder-three-outline'} size={24} color="#F9FAFB" />
           </TouchableOpacity>
         </View>
 
         {activeVehicle ? (
           <View style={styles.contentSection}>
-            
+            {isReorderMode && (
+              <View style={styles.reorderBanner}>
+                <Ionicons name="hand-left-outline" size={18} color="#93C5FD" />
+                <Text style={styles.reorderBannerText}>Role, toque e segure um card, depois arraste para a posição desejada</Text>
+              </View>
+            )}
+
             <View style={{ marginBottom: 32 }}>
               <FlatList
                 ref={vehicleListRef}
                 data={vehicles}
                 horizontal
                 showsHorizontalScrollIndicator={false}
+                scrollEnabled={!draggingReorderVehicleId}
                 keyExtractor={item => item.id.toString()}
                 contentContainerStyle={{ paddingHorizontal: 24 }}
-                snapToInterval={VEHICLE_CARD_STEP}
+                snapToInterval={isReorderMode ? REORDER_CARD_STEP : VEHICLE_CARD_STEP}
                 decelerationRate="fast"
                 getItemLayout={(_, index) => ({
-                  length: VEHICLE_CARD_STEP,
-                  offset: VEHICLE_CARD_STEP * index,
+                  length: isReorderMode ? REORDER_CARD_STEP : VEHICLE_CARD_STEP,
+                  offset: (isReorderMode ? REORDER_CARD_STEP : VEHICLE_CARD_STEP) * index,
                   index,
                 })}
                 onMomentumScrollEnd={(event) => {
+                  if (isReorderMode) {
+                    return;
+                  }
                   const nextIndex = Math.round(event.nativeEvent.contentOffset.x / VEHICLE_CARD_STEP);
                   selectVehicleFromCarouselIndex(nextIndex);
                 }}
-                renderItem={({ item }) => {
+                renderItem={({ item, index }) => {
                   const itemRecords = recordsByVehicleId[item.id] ?? [];
-                  const itemStatusSummary = getStatusSummary(itemRecords, item.currentMileage);
+
+                  if (isReorderMode) {
+                    return (
+                      <ReorderVehicleItem
+                        vehicle={item}
+                        index={index}
+                        dragFromIndex={dragFromIndex}
+                        hoverIndex={hoverIndex}
+                        maxIndex={vehicles.length - 1}
+                        isSelected={item.id === activeVehicle?.id}
+                        isDragging={draggingReorderVehicleId === item.id}
+                        onLongPress={() => {
+                          setDraggingReorderVehicleId(item.id);
+                          setDragFromIndex(index);
+                          setHoverIndex(index);
+                        }}
+                        onDragMove={updateHoverIndex}
+                        onDragEnd={finishVehicleDrag}
+                      />
+                    );
+                  }
 
                   return (
-                    <View
-                      style={styles.vehicleCardWrapper}
-                      onLayout={
-                        vehicleCardHeight > 0
-                          ? undefined
-                          : (event) => setVehicleCardHeight(event.nativeEvent.layout.height)
-                      }
-                    >
-                      <VehicleCarouselCard
-                        brand={item.brand}
-                        model={item.model}
-                        year={item.year.toString()}
-                        mileage={item.currentMileage}
-                        status={getVehicleStatus(itemRecords, item.currentMileage)}
-                        overdueCount={itemStatusSummary.overdue}
-                        soonCount={itemStatusSummary.soon}
-                        healthScore={getHealthScore(itemRecords, item.currentMileage)}
-                        isSelected={item.id === activeVehicle?.id}
-                        onPress={() => handleSelectVehicle(item)}
-                      />
-                    </View>
+                    <VehicleCarouselItem
+                      vehicle={item}
+                      records={itemRecords}
+                      isSelected={item.id === activeVehicle?.id}
+                      height={vehicleCardHeight}
+                      onLayoutHeight={setVehicleCardHeight}
+                      onPress={() => handleSelectVehicle(item)}
+                    />
                   );
                 }}
-                ListFooterComponent={
+                ListFooterComponent={!isReorderMode ? (
                   <View style={styles.vehicleCardWrapper}>
                     <TouchableOpacity
                       style={[
@@ -202,19 +502,24 @@ export default function Dashboard() {
                       <Text style={styles.addVehicleSubText}>Carro, moto ou trabalho</Text>
                     </TouchableOpacity>
                   </View>
-                }
+                ) : null}
               />
             </View>
 
             <View style={styles.smartSection}>
               <View style={styles.healthCard}>
+                <View style={[styles.healthAccent, { backgroundColor: healthColor }]} />
                 <View style={styles.healthHeader}>
                   <View>
                     <Text style={styles.cardEyebrow}>Saúde do veículo</Text>
-                    <Text style={styles.healthValue}>{healthScore}/100</Text>
+                    <View style={styles.healthValueRow}>
+                      <Text style={styles.healthValue}>{healthScore}</Text>
+                      <Text style={styles.healthMax}>/100</Text>
+                    </View>
+                    <Text style={[styles.healthStatusText, { color: healthColor }]}>{healthLabel}</Text>
                   </View>
-                  <View style={styles.healthIconBox}>
-                    <Ionicons name="pulse" size={24} color={healthScore >= 80 ? '#10B981' : healthScore >= 60 ? '#F59E0B' : '#EF4444'} />
+                  <View style={[styles.healthIconBox, { borderColor: `${healthColor}55`, backgroundColor: `${healthColor}18` }]}>
+                    <Ionicons name="pulse" size={24} color={healthColor} />
                   </View>
                 </View>
                 <View style={styles.healthTrack}>
@@ -223,37 +528,52 @@ export default function Dashboard() {
                       styles.healthFill,
                       {
                         width: `${healthScore}%`,
-                        backgroundColor: healthScore >= 80 ? '#10B981' : healthScore >= 60 ? '#F59E0B' : '#EF4444',
+                        backgroundColor: healthColor,
                       },
                     ]}
                   />
                 </View>
-              </View>
-
-              <View style={styles.summaryGrid}>
-                <View style={styles.summaryCard}>
-                  <Ionicons name="warning-outline" size={22} color="#EF4444" />
-                  <Text style={styles.summaryValue}>{statusOverdue}</Text>
-                  <Text style={styles.summaryLabel}>Atrasadas</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Ionicons name="calendar-outline" size={22} color="#F59E0B" />
-                  <Text style={styles.summaryValue}>{statusSoon}</Text>
-                  <Text style={styles.summaryLabel}>Próximas</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Ionicons name="build-outline" size={22} color="#60A5FA" />
-                  <Text style={styles.summaryValue}>{records.length}</Text>
-                  <Text style={styles.summaryLabel}>Manutenções</Text>
+                <View style={styles.healthLegendRow}>
+                  <Text style={styles.healthLegendText}>{statusOverdue} atrasada(s)</Text>
+                  <Text style={styles.healthLegendText}>{statusSoon} próxima(s)</Text>
                 </View>
               </View>
 
-              <View style={styles.spendingCard}>
-                <View>
-                  <Text style={styles.cardEyebrow}>Gastos</Text>
-                  <Text style={styles.spendingPeriod}>Todo período</Text>
+              <View style={styles.overviewSection}>
+                <Text style={styles.sectionTitle}>Visão Geral</Text>
+                {renderCarousel()}
+              </View>
+
+              <View style={styles.financialCard}>
+                <View style={styles.financialHeader}>
+                  <View>
+                    <Text style={styles.cardEyebrow}>Resumo financeiro</Text>
+                    <Text style={styles.spendingPeriod}>Período: {getFinancePeriodLabel(financePeriod)}</Text>
+                  </View>
+                  <Ionicons name="cash-outline" size={24} color="#10B981" />
                 </View>
-                <Text style={styles.spendingValue}>{formatCurrencyBRL(totalSpent)}</Text>
+
+                <PeriodFilter
+                  value={financePeriod}
+                  onChange={setFinancePeriod}
+                  style={styles.periodFilter}
+                />
+
+                <View style={styles.financialTotalRow}>
+                  <Text style={styles.financialLabel}>Total gasto</Text>
+                  <Text style={styles.spendingValue}>{formatCurrencyBRL(expenseSummary.total)}</Text>
+                </View>
+
+                <View style={styles.financialStatsGrid}>
+                  <View style={styles.financialStatBox}>
+                    <Text style={styles.financialStatValue}>{expenseSummary.count}</Text>
+                    <Text style={styles.financialStatLabel}>Manutenções</Text>
+                  </View>
+                  <View style={styles.financialStatBox}>
+                    <Text style={styles.financialStatValue}>{formatCurrencyBRL(expenseSummary.average)}</Text>
+                    <Text style={styles.financialStatLabel}>Média</Text>
+                  </View>
+                </View>
               </View>
             </View>
 
@@ -290,11 +610,6 @@ export default function Dashboard() {
                   </View>
                 </View>
               )}
-            </View>
-
-            <View style={{ marginBottom: 32 }}>
-              <Text style={[styles.sectionTitle, { paddingHorizontal: 24 }]}>Visão Geral</Text>
-              {renderCarousel()}
             </View>
 
             <View style={{ paddingHorizontal: 24 }}>
@@ -382,8 +697,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#374151',
   },
+  settingsBtnActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#60A5FA',
+  },
   contentSection: {
     flex: 1,
+  },
+  reorderBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(37, 99, 235, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.35)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 24,
+    marginBottom: 16,
+  },
+  reorderBannerText: {
+    color: '#BFDBFE',
+    fontSize: 13,
+    fontWeight: '800',
+    marginLeft: 8,
   },
   sectionTitle: {
     fontSize: 18,
@@ -430,21 +767,37 @@ const styles = StyleSheet.create({
   carouselContainer: {
     marginBottom: 8,
   },
+  metricsCarouselContent: {
+    paddingRight: 2,
+  },
   smartSection: {
     paddingHorizontal: 24,
     marginBottom: 24,
   },
   healthCard: {
-    backgroundColor: '#1F2937',
-    borderRadius: 18,
+    backgroundColor: '#172033',
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: '#374151',
-    marginBottom: 14,
+    borderColor: '#31415F',
+    marginBottom: 22,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  healthAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
   },
   healthHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 16,
   },
@@ -455,67 +808,117 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 6,
   },
+  healthValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
   healthValue: {
     color: '#F9FAFB',
-    fontSize: 30,
+    fontSize: 32,
     fontWeight: '900',
+    lineHeight: 36,
+  },
+  healthMax: {
+    color: '#9CA3AF',
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 4,
+    marginLeft: 2,
+  },
+  healthStatusText: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 4,
   },
   healthIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#111827',
+    width: 46,
+    height: 46,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#374151',
   },
   healthTrack: {
-    height: 10,
+    height: 9,
     borderRadius: 999,
     backgroundColor: '#111827',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   healthFill: {
     height: '100%',
     borderRadius: 999,
   },
-  summaryGrid: {
+  healthLegendRow: {
     flexDirection: 'row',
-    marginHorizontal: -5,
-    marginBottom: 14,
-  },
-  summaryCard: {
-    flex: 1,
-    minHeight: 104,
-    backgroundColor: '#1F2937',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#374151',
-    padding: 12,
-    marginHorizontal: 5,
     justifyContent: 'space-between',
+    marginTop: 10,
   },
-  summaryValue: {
-    color: '#F9FAFB',
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  summaryLabel: {
+  healthLegendText: {
     color: '#9CA3AF',
     fontSize: 11,
     fontWeight: '700',
-    textTransform: 'uppercase',
   },
-  spendingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  overviewSection: {
+    marginBottom: 22,
+  },
+  financialCard: {
     backgroundColor: '#1F2937',
     borderRadius: 18,
     padding: 18,
     borderWidth: 1,
     borderColor: '#374151',
+  },
+  financialHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  periodFilter: {
+    marginBottom: 18,
+  },
+  financialTotalRow: {
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  financialLabel: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  financialStatsGrid: {
+    flexDirection: 'row',
+    marginHorizontal: -5,
+  },
+  financialStatBox: {
+    flex: 1,
+    minHeight: 76,
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    padding: 12,
+    marginHorizontal: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'space-between',
+  },
+  financialStatValue: {
+    color: '#F9FAFB',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  financialStatLabel: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   spendingPeriod: {
     color: '#D1D5DB',
@@ -524,7 +927,7 @@ const styles = StyleSheet.create({
   },
   spendingValue: {
     color: '#10B981',
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: '900',
   },
   recentCard: {
@@ -581,6 +984,66 @@ const styles = StyleSheet.create({
   vehicleCardWrapper: {
     width: VEHICLE_CARD_WIDTH,
     marginRight: VEHICLE_CARD_SPACING,
+  },
+  reorderMiniWrapper: {
+    width: REORDER_CARD_WIDTH,
+    marginRight: REORDER_CARD_SPACING,
+  },
+  reorderMiniWrapperDragging: {
+    zIndex: 5,
+    elevation: 12,
+  },
+  reorderMiniCard: {
+    minHeight: 148,
+    backgroundColor: '#1F2937',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#374151',
+    padding: 14,
+    justifyContent: 'space-between',
+  },
+  reorderMiniCardSelected: {
+    borderColor: '#60A5FA',
+    backgroundColor: '#172033',
+  },
+  reorderMiniTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reorderMiniIndex: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: 'rgba(59, 130, 246, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.35)',
+  },
+  reorderMiniIndexText: {
+    color: '#BFDBFE',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  reorderMiniBrand: {
+    color: '#93C5FD',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    marginTop: 14,
+  },
+  reorderMiniModel: {
+    color: '#F9FAFB',
+    fontSize: 16,
+    fontWeight: '900',
+    lineHeight: 20,
+    minHeight: 40,
+  },
+  reorderMiniKm: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   addVehicleCard: {
     width: '100%',

@@ -6,8 +6,8 @@ export const createVehicle = (brand: string, model: string, year: number, plate:
     const createdAt = new Date().toISOString();
 
     const result = db.runSync(
-      'INSERT INTO vehicle (brand, model, year, plate, currentMileage, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-      brand, model, year, plate, currentMileage ?? null, createdAt
+      'INSERT INTO vehicle (brand, model, year, plate, currentMileage, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      brand, model, year, plate, currentMileage ?? null, Date.now(), createdAt
     );
 
     return result.lastInsertRowId;
@@ -32,7 +32,7 @@ export const getFirstVehicle = (): Vehicle | null => {
 
 export const getVehicles = (): Vehicle[] => {
   return withDbRecovery((db) => {
-    return db.getAllSync<Vehicle>('SELECT * FROM vehicle ORDER BY id DESC');
+    return db.getAllSync<Vehicle>('SELECT * FROM vehicle ORDER BY sortOrder DESC, id DESC');
   });
 };
 
@@ -46,5 +46,17 @@ export const getVehicleById = (id: number): Vehicle | null => {
 export const deleteVehicle = (id: number): void => {
   withDbRecovery((db) => {
     db.runSync('DELETE FROM vehicle WHERE id = ?', id);
+  });
+};
+
+export const updateVehicleOrder = (vehicles: Vehicle[]): void => {
+  withDbRecovery((db) => {
+    vehicles.forEach((vehicle, index) => {
+      db.runSync(
+        'UPDATE vehicle SET sortOrder = ? WHERE id = ?',
+        vehicles.length - index,
+        vehicle.id
+      );
+    });
   });
 };

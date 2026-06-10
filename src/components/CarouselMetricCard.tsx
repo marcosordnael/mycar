@@ -20,7 +20,7 @@ export const CarouselMetricCard = ({
   return (
     <View style={[styles.card, style]}>
       <View style={[styles.iconContainer, { backgroundColor: `${color}1A` }]}>
-        <Ionicons name={icon} size={24} color={color} />
+        <Ionicons name={icon} size={21} color={color} />
       </View>
       <Text style={styles.title} numberOfLines={1}>{title}</Text>
       <Text style={styles.value} numberOfLines={1}>{value}</Text>
@@ -33,7 +33,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#1F2937',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     width: CARD_WIDTH,
     marginRight: 16,
     borderWidth: 1,
@@ -45,27 +45,27 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   iconContainer: {
-    width: 44,
-    height: 44,
+    width: 38,
+    height: 38,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   title: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#9CA3AF',
-    marginBottom: 8,
+    marginBottom: 6,
     fontWeight: '500',
   },
   value: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#F9FAFB',
     marginBottom: 4,
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6B7280',
   }
 });

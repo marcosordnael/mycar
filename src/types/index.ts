@@ -5,6 +5,7 @@ export interface Vehicle {
   year: number;
   plate: string;
   currentMileage?: number;
+  sortOrder?: number;
   createdAt: string;
 }
 

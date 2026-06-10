@@ -6,12 +6,13 @@ import { TextField } from '../src/components/TextField';
 import { Button } from '../src/components/Button';
 import { FormSectionCard } from '../src/components/FormSectionCard';
 import { GradientCard } from '../src/components/GradientCard';
-import { getVehicleById, updateVehicle, deleteVehicle } from '../src/database/repositories/vehicleRepository';
-import { getSelectedVehicleId } from '../src/database/repositories/settingsRepository';
+import { updateVehicle } from '../src/database/repositories/vehicleRepository';
 import { Vehicle } from '../src/types';
+import { useSelectedVehicle } from '../src/context/SelectedVehicleContext';
 
 export default function VehicleSettings() {
   const router = useRouter();
+  const { selectedVehicle, refreshSelectedVehicle } = useSelectedVehicle();
   
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [brand, setBrand] = useState('');
@@ -21,9 +22,11 @@ export default function VehicleSettings() {
   const [currentMileage, setCurrentMileage] = useState('');
 
   useEffect(() => {
-    const selectedId = getSelectedVehicleId();
-    if (!selectedId) return;
-    const v = getVehicleById(selectedId);
+    refreshSelectedVehicle();
+  }, [refreshSelectedVehicle]);
+
+  useEffect(() => {
+    const v = selectedVehicle;
     if (v) {
       setVehicle(v);
       setBrand(v.brand);
@@ -32,7 +35,7 @@ export default function VehicleSettings() {
       setPlate(v.plate);
       setCurrentMileage(v.currentMileage ? v.currentMileage.toString() : '');
     }
-  }, []);
+  }, [selectedVehicle]);
 
   const handleSave = () => {
     if (!vehicle) return;
@@ -63,6 +66,7 @@ export default function VehicleSettings() {
         plate.trim(),
         curMileage
       );
+      refreshSelectedVehicle();
       Alert.alert('Sucesso', 'Dados do veículo atualizados!', [
         { text: 'OK', onPress: () => router.back() }
       ]);

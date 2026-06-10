@@ -4,6 +4,7 @@ import { closeDbConnection, initDb } from '../src/database/db';
 import { View, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SelectedVehicleProvider } from '../src/context/SelectedVehicleContext';
 
 export default function Layout() {
   const [dbReady, setDbReady] = useState(false);
@@ -34,8 +35,10 @@ export default function Layout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" />
-      <Slot />
+      <SelectedVehicleProvider>
+        <StatusBar style="light" />
+        <Slot />
+      </SelectedVehicleProvider>
     </SafeAreaProvider>
   );
 }

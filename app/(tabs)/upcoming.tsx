@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from '
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getVehicleById } from '../../src/database/repositories/vehicleRepository';
-import { getSelectedVehicleId } from '../../src/database/repositories/settingsRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
-import { MaintenanceRecord, Vehicle } from '../../src/types';
+import { MaintenanceRecord } from '../../src/types';
 import { formatDateBR } from '../../src/utils/formatters';
 import { getRevisionStatus, getStatusColor, getStatusLabel } from '../../src/utils/statusHelper';
+import { getStatusSummary, getUpcomingMaintenances } from '../../src/utils/maintenanceMetrics';
+import { useSelectedVehicle } from '../../src/context/SelectedVehicleContext';
 
 const getCardIndicatorStyle = (color: string) => ({
   width: 6,
@@ -17,57 +17,30 @@ const getCardIndicatorStyle = (color: string) => ({
 
 export default function Upcoming() {
   const router = useRouter();
-  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const { selectedVehicle, refreshSelectedVehicle } = useSelectedVehicle();
   const [upcomingRecords, setUpcomingRecords] = useState<MaintenanceRecord[]>([]);
 
   useFocusEffect(
     useCallback(() => {
-      const selectedVehicleId = getSelectedVehicleId();
-      const v = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
-      if (v) {
-        setVehicle(v);
-        const allRecords = getMaintenanceRecords(v.id);
-        
-        const filtered = allRecords.filter(r => r.nextRevisionDate || r.nextRevisionMileage);
+      refreshSelectedVehicle();
 
-        filtered.sort((a, b) => {
-          const statusA = getRevisionStatus(a.nextRevisionDate, a.nextRevisionMileage, v.currentMileage);
-          const statusB = getRevisionStatus(b.nextRevisionDate, b.nextRevisionMileage, v.currentMileage);
-          
-          if (statusA === 'ATRASADA' && statusB !== 'ATRASADA') return -1;
-          if (statusB === 'ATRASADA' && statusA !== 'ATRASADA') return 1;
-
-          if (a.nextRevisionDate && b.nextRevisionDate) {
-            return new Date(a.nextRevisionDate).getTime() - new Date(b.nextRevisionDate).getTime();
-          }
-          return 0;
-        });
-
-        setUpcomingRecords(filtered);
+      if (selectedVehicle) {
+        const allRecords = getMaintenanceRecords(selectedVehicle.id);
+        setUpcomingRecords(getUpcomingMaintenances(allRecords, selectedVehicle.currentMileage));
       } else {
-        setVehicle(null);
         setUpcomingRecords([]);
       }
-    }, [])
+    }, [refreshSelectedVehicle, selectedVehicle?.id, selectedVehicle?.currentMileage])
   );
 
   const stats = useMemo(() => {
-    let overdue = 0;
-    let soon = 0;
-    let ok = 0;
-    
-    upcomingRecords.forEach(r => {
-      const status = getRevisionStatus(r.nextRevisionDate, r.nextRevisionMileage, vehicle?.currentMileage);
-      if (status === 'ATRASADA') overdue++;
-      else if (status === 'PROXIMA') soon++;
-      else ok++;
-    });
+    const summary = getStatusSummary(upcomingRecords, selectedVehicle?.currentMileage);
 
-    return { overdue, soon, ok };
-  }, [upcomingRecords, vehicle]);
+    return { overdue: summary.overdue, soon: summary.soon, ok: summary.ok };
+  }, [upcomingRecords, selectedVehicle?.currentMileage]);
 
   const renderItem = ({ item }: { item: MaintenanceRecord }) => {
-    const status = getRevisionStatus(item.nextRevisionDate, item.nextRevisionMileage, vehicle?.currentMileage);
+    const status = getRevisionStatus(item.nextRevisionDate, item.nextRevisionMileage, selectedVehicle?.currentMileage);
     const badgeColor = getStatusColor(status);
     const badgeLabel = getStatusLabel(status);
 

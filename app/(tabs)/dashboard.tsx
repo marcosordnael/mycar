@@ -7,87 +7,58 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getVehicles } from '../../src/database/repositories/vehicleRepository';
-import { getSelectedVehicleId, setSelectedVehicleId } from '../../src/database/repositories/settingsRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
 import { Vehicle, MaintenanceRecord } from '../../src/types';
 import { formatCurrencyBRL, formatDateBR } from '../../src/utils/formatters';
-import { getRevisionStatus } from '../../src/utils/statusHelper';
-import { GradientCard } from '../../src/components/GradientCard';
+import { getHealthScore, getStatusSummary, getTotalSpent, getVehicleStatus } from '../../src/utils/maintenanceMetrics';
 import { CarouselMetricCard } from '../../src/components/CarouselMetricCard';
+import { VehicleCarouselCard } from '../../src/components/VehicleCarouselCard';
+import { useSelectedVehicle } from '../../src/context/SelectedVehicleContext';
 
 export default function Dashboard() {
   const router = useRouter();
   const tabBarHeight = useBottomTabBarHeight();
   const extraBottomPadding = Platform.OS === 'ios' ? 8 : 0;
+  const { selectedVehicle, setSelectedVehicle, refreshSelectedVehicle } = useSelectedVehicle();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [activeVehicleId, setActiveVehicleId] = useState<number | null>(null);
-  const activeVehicle = vehicles.find(v => v.id === activeVehicleId);
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
+  const [recordsByVehicleId, setRecordsByVehicleId] = useState<Record<number, MaintenanceRecord[]>>({});
   const [vehicleCardHeight, setVehicleCardHeight] = useState(0);
+  const activeVehicle = selectedVehicle;
 
   useFocusEffect(
     useCallback(() => {
       const allVehicles = getVehicles();
-      setVehicles(allVehicles);
+      const nextRecordsByVehicleId = allVehicles.reduce<Record<number, MaintenanceRecord[]>>((acc, vehicle) => {
+        acc[vehicle.id] = getMaintenanceRecords(vehicle.id);
+        return acc;
+      }, {});
 
-      if (allVehicles.length > 0) {
-        let selectedId = getSelectedVehicleId();
-        if (!selectedId || !allVehicles.find(v => v.id === selectedId)) {
-          selectedId = allVehicles[0].id;
-          setSelectedVehicleId(selectedId);
-        }
-        setActiveVehicleId(selectedId);
-        const maintRecords = getMaintenanceRecords(selectedId);
-        setRecords(maintRecords);
+      setVehicles(allVehicles);
+      setRecordsByVehicleId(nextRecordsByVehicleId);
+      refreshSelectedVehicle();
+
+      if (activeVehicle) {
+        setRecords(nextRecordsByVehicleId[activeVehicle.id] ?? []);
       } else {
-        setActiveVehicleId(null);
         setRecords([]);
       }
-    }, [])
+    }, [activeVehicle?.id, refreshSelectedVehicle])
   );
 
-  const handleSelectVehicle = (id: number) => {
-    if (id === activeVehicleId) {
+  const handleSelectVehicle = (vehicle: Vehicle) => {
+    if (vehicle.id === activeVehicle?.id) {
       router.push('/vehicle-settings');
     } else {
-      setSelectedVehicleId(id);
-      
-      const parsedVehicles = getVehicles();
-      setVehicles(parsedVehicles);
-      setActiveVehicleId(id);
-      setRecords(getMaintenanceRecords(id));
+      setSelectedVehicle(vehicle);
+      setRecords(recordsByVehicleId[vehicle.id] ?? getMaintenanceRecords(vehicle.id));
     }
   };
 
-  const totalSpent = records.reduce((acc, curr) => acc + curr.cost, 0);
-  const lastMaintenance = records.length > 0 ? records[0] : null;
-  
-  // Status check for alerts
-  const upcomingRecords = records.filter(r => r.nextRevisionDate || r.nextRevisionMileage);
-  let statusOverdue = 0;
-  let statusSoon = 0;
-  let statusOk = 0;
-  let nextMaintenance: MaintenanceRecord | null = null;
-  
-  upcomingRecords.forEach(r => {
-    const status = getRevisionStatus(r.nextRevisionDate, r.nextRevisionMileage, activeVehicle?.currentMileage);
-    if (status === 'ATRASADA') statusOverdue++;
-    else if (status === 'PROXIMA') statusSoon++;
-    else if (status === 'EM_DIA') statusOk++;
-  });
-
-  // Sort upcoming for displaying the "next" properly
-  const sortedUpcoming = [...upcomingRecords].sort((a, b) => {
-     const statusA = getRevisionStatus(a.nextRevisionDate, a.nextRevisionMileage, activeVehicle?.currentMileage);
-     const statusB = getRevisionStatus(b.nextRevisionDate, b.nextRevisionMileage, activeVehicle?.currentMileage);
-     if (statusA === 'ATRASADA' && statusB !== 'ATRASADA') return -1;
-     if (statusB === 'ATRASADA' && statusA !== 'ATRASADA') return 1;
-     if (a.nextRevisionDate && b.nextRevisionDate) {
-       return new Date(a.nextRevisionDate).getTime() - new Date(b.nextRevisionDate).getTime();
-     }
-     return 0;
-  });
-  if (sortedUpcoming.length > 0) nextMaintenance = sortedUpcoming[0];
+  const totalSpent = getTotalSpent(records);
+  const statusSummary = getStatusSummary(records, activeVehicle?.currentMileage);
+  const statusOverdue = statusSummary.overdue;
+  const statusSoon = statusSummary.soon;
 
   const renderCarousel = () => {
     const data = [
@@ -146,26 +117,34 @@ export default function Dashboard() {
                 contentContainerStyle={{ paddingHorizontal: 24 }}
                 snapToInterval={width - 48 + 16}
                 decelerationRate="fast"
-                renderItem={({ item }) => (
-                  <View
-                    style={styles.vehicleCardWrapper}
-                    onLayout={
-                      vehicleCardHeight > 0
-                        ? undefined
-                        : (event) => setVehicleCardHeight(event.nativeEvent.layout.height)
-                    }
-                  >
-                    <GradientCard
-                      brand={item.brand}
-                      model={item.model}
-                      plate={item.plate}
-                      year={item.year.toString()}
-                      mileage={item.currentMileage}
-                      showSelectedBadge={item.id === activeVehicleId}
-                      onPress={() => handleSelectVehicle(item.id)}
-                    />
-                  </View>
-                )}
+                renderItem={({ item }) => {
+                  const itemRecords = recordsByVehicleId[item.id] ?? [];
+                  const itemStatusSummary = getStatusSummary(itemRecords, item.currentMileage);
+
+                  return (
+                    <View
+                      style={styles.vehicleCardWrapper}
+                      onLayout={
+                        vehicleCardHeight > 0
+                          ? undefined
+                          : (event) => setVehicleCardHeight(event.nativeEvent.layout.height)
+                      }
+                    >
+                      <VehicleCarouselCard
+                        brand={item.brand}
+                        model={item.model}
+                        year={item.year.toString()}
+                        mileage={item.currentMileage}
+                        status={getVehicleStatus(itemRecords, item.currentMileage)}
+                        overdueCount={itemStatusSummary.overdue}
+                        soonCount={itemStatusSummary.soon}
+                        healthScore={getHealthScore(itemRecords, item.currentMileage)}
+                        isSelected={item.id === activeVehicle?.id}
+                        onPress={() => handleSelectVehicle(item)}
+                      />
+                    </View>
+                  );
+                }}
                 ListFooterComponent={
                   <View style={styles.vehicleCardWrapper}>
                     <TouchableOpacity
@@ -175,8 +154,11 @@ export default function Dashboard() {
                       ]}
                       onPress={() => router.push('/add-vehicle')}
                     >
-                      <Ionicons name="add-circle-outline" size={48} color="#3B82F6" />
+                      <View style={styles.addVehicleIcon}>
+                        <Ionicons name="add" size={36} color="#93C5FD" />
+                      </View>
                       <Text style={styles.addVehicleText}>Adicionar Veículo</Text>
+                      <Text style={styles.addVehicleSubText}>Carro, moto ou trabalho</Text>
                     </TouchableOpacity>
                   </View>
                 }
@@ -413,19 +395,37 @@ const styles = StyleSheet.create({
   },
   addVehicleCard: {
     width: '100%',
-    borderRadius: 20,
-    backgroundColor: '#1F2937',
+    minHeight: 230,
+    borderRadius: 22,
+    backgroundColor: '#111827',
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#3B82F6',
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 24,
+  },
+  addVehicleIcon: {
+    width: 76,
+    height: 76,
+    borderRadius: 24,
+    backgroundColor: 'rgba(59, 130, 246, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.38)',
+    marginBottom: 18,
   },
   addVehicleText: {
-    color: '#3B82F6',
+    color: '#F9FAFB',
+    fontWeight: '900',
+    fontSize: 19,
+  },
+  addVehicleSubText: {
+    color: '#9CA3AF',
     fontWeight: '600',
-    marginTop: 12,
-    fontSize: 16,
+    marginTop: 8,
+    fontSize: 13,
   },
 
   emptyText: {

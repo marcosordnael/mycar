@@ -7,14 +7,15 @@ import { SelectField, SelectOption } from '../src/components/SelectField';
 import { Button } from '../src/components/Button';
 import { FormSectionCard } from '../src/components/FormSectionCard';
 import { GradientCard } from '../src/components/GradientCard';
-import { createVehicle } from '../src/database/repositories/vehicleRepository';
-import { setSelectedVehicleId } from '../src/database/repositories/settingsRepository';
+import { createVehicle, getVehicleById } from '../src/database/repositories/vehicleRepository';
 import { fetchCarBrands, fetchCarModelsByBrand, fetchCarYearsByBrandAndModel } from '../src/services/fipeService';
 import { FipeYear } from '../src/types';
+import { useSelectedVehicle } from '../src/context/SelectedVehicleContext';
 
 export default function AddVehicle() {
   const router = useRouter();
   const maxExpectedYear = new Date().getFullYear() + 1;
+  const { setSelectedVehicle } = useSelectedVehicle();
   
   // FIPE States
   const [brands, setBrands] = useState<SelectOption[]>([]);
@@ -150,8 +151,8 @@ export default function AddVehicle() {
         plate.trim().toUpperCase(),
         curMileage
       );
-      // Define como ativo o novo veículo
-      setSelectedVehicleId(newId);
+      const newVehicle = getVehicleById(newId);
+      setSelectedVehicle(newVehicle);
       router.replace('/(tabs)/dashboard');
     } catch (e) {
       Alert.alert('Erro', 'Ocorreu um erro ao salvar o veículo.');

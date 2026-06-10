@@ -6,11 +6,12 @@ import { TextField } from '../src/components/TextField';
 import { Button } from '../src/components/Button';
 import { FormSectionCard } from '../src/components/FormSectionCard';
 import { createMaintenanceRecord } from '../src/database/repositories/maintenanceRepository';
-import { getVehicleById, updateVehicle } from '../src/database/repositories/vehicleRepository';
-import { getSelectedVehicleId } from '../src/database/repositories/settingsRepository';
+import { updateVehicle } from '../src/database/repositories/vehicleRepository';
+import { useSelectedVehicle } from '../src/context/SelectedVehicleContext';
 
 export default function AddMaintenance() {
   const router = useRouter();
+  const { selectedVehicle, refreshSelectedVehicle } = useSelectedVehicle();
   
   const [serviceType, setServiceType] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // yyyy-mm-dd fallback simples
@@ -38,8 +39,7 @@ export default function AddMaintenance() {
       return;
     }
 
-    const selectedVehicleId = getSelectedVehicleId();
-    const vehicle = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
+    const vehicle = selectedVehicle;
     if (!vehicle) {
       Alert.alert('Erro', 'Nenhum veículo encontrado. Cadastre um veículo primeiro.');
       return;
@@ -79,6 +79,7 @@ export default function AddMaintenance() {
           vehicle.plate,
           numMileage
         );
+        refreshSelectedVehicle();
       }
 
       Alert.alert('Sucesso', 'Manutenção registrada com sucesso!', [

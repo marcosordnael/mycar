@@ -3,29 +3,26 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from '
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getVehicleById } from '../../src/database/repositories/vehicleRepository';
-import { getSelectedVehicleId } from '../../src/database/repositories/settingsRepository';
 import { getMaintenanceRecords } from '../../src/database/repositories/maintenanceRepository';
-import { MaintenanceRecord, Vehicle } from '../../src/types';
+import { MaintenanceRecord } from '../../src/types';
 import { formatCurrencyBRL, formatDateBR } from '../../src/utils/formatters';
+import { useSelectedVehicle } from '../../src/context/SelectedVehicleContext';
 
 export default function Maintenances() {
   const router = useRouter();
-  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const { selectedVehicle, refreshSelectedVehicle } = useSelectedVehicle();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
 
   useFocusEffect(
     useCallback(() => {
-      const selectedVehicleId = getSelectedVehicleId();
-      const v = selectedVehicleId ? getVehicleById(selectedVehicleId) : null;
-      if (v) {
-        setVehicle(v);
-        setRecords(getMaintenanceRecords(v.id));
+      refreshSelectedVehicle();
+
+      if (selectedVehicle) {
+        setRecords(getMaintenanceRecords(selectedVehicle.id));
       } else {
-        setVehicle(null);
         setRecords([]);
       }
-    }, [])
+    }, [refreshSelectedVehicle, selectedVehicle?.id])
   );
 
   const renderItem = ({ item }: { item: MaintenanceRecord }) => {

@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TextField } from '../src/components/TextField';
 import { SelectField, SelectOption } from '../src/components/SelectField';
+import { AutocompleteField } from '../src/components/AutocompleteField';
 import { Button } from '../src/components/Button';
 import { FormSectionCard } from '../src/components/FormSectionCard';
 import { GradientCard } from '../src/components/GradientCard';
@@ -103,6 +104,17 @@ export default function AddVehicle() {
     }
   };
 
+  const handleBrandChange = (value: string) => {
+    setBrand(value);
+    setSelectedBrandCode('');
+    setModels([]);
+    setYears([]);
+    setSelectedModelCode('');
+    setModel('');
+    setSelectedYearCode('');
+    setYear('');
+  };
+
   const handleModelSelect = async (val: string, label: string) => {
     setSelectedModelCode(val);
     setModel(label);
@@ -118,6 +130,14 @@ export default function AddVehicle() {
     } finally {
       setLoadingYears(false);
     }
+  };
+
+  const handleModelChange = (value: string) => {
+    setModel(value);
+    setSelectedModelCode('');
+    setYears([]);
+    setSelectedYearCode('');
+    setYear('');
   };
 
   const handleYearSelect = (val: string, label: string) => {
@@ -182,22 +202,26 @@ export default function AddVehicle() {
 
           <View style={styles.form}>
             <FormSectionCard title="Identificação (FIPE)" icon="car">
-              <SelectField 
+              <AutocompleteField
                  label="Marca*"
-                 displayValue={brand}
+                 value={brand}
                  options={brands}
+                 onChangeText={handleBrandChange}
                  onSelect={handleBrandSelect}
                  isLoading={loadingBrands}
-                 placeholder="Selecione a Marca"
+                 placeholder="Digite a marca"
+                 emptyMessage="Nenhuma marca encontrada"
               />
-              <SelectField 
+              <AutocompleteField
                  label="Modelo*"
-                 displayValue={model}
+                 value={model}
                  options={models}
+                 onChangeText={handleModelChange}
                  onSelect={handleModelSelect}
                  isLoading={loadingModels}
                  disabled={!selectedBrandCode}
-                 placeholder="Selecione o Modelo"
+                 placeholder={selectedBrandCode ? 'Digite o modelo' : 'Selecione a marca primeiro'}
+                 emptyMessage="Nenhum modelo encontrado"
               />
               <SelectField 
                  label="Ano*"

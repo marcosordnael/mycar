@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import { useSelectedVehicle } from '../src/context/SelectedVehicleContext';
 
 export default function AddVehicle() {
   const router = useRouter();
+  const scrollViewRef = useRef<ScrollView>(null);
   const maxExpectedYear = new Date().getFullYear() + 1;
   const { setSelectedVehicle } = useSelectedVehicle();
   
@@ -145,6 +146,12 @@ export default function AddVehicle() {
     setYear(label);
   };
 
+  const scrollToMileageField = () => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 180);
+  };
+
   const handleSave = () => {
     if (!brand.trim() || !model.trim() || !year.trim() || !plate.trim()) {
       Alert.alert('Erro', 'Preencha todos os campos obrigatórios.');
@@ -182,8 +189,19 @@ export default function AddVehicle() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+        >
           
           <View style={styles.header}>
              <Text style={styles.title}>Novo Veículo</Text>
@@ -251,6 +269,7 @@ export default function AddVehicle() {
                 onChangeText={setCurrentMileage}
                 keyboardType="number-pad"
                 placeholder="Ex: 10000"
+                onFocus={scrollToMileageField}
               />
             </FormSectionCard>
           </View>
